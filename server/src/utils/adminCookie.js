@@ -5,7 +5,8 @@ const ADMIN_COOKIE_PATH = "/api/admin";
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let secureCookie = false;
 try {
-    secureCookie = new URL(process.env.ADMIN_ORIGIN).protocol === "https:";
+    secureCookie = process.env.NODE_ENV === "production"
+        || new URL(process.env.ADMIN_ORIGIN).protocol === "https:";
 } catch {
     // Admin routes return a configuration error before any cookie operation.
 }

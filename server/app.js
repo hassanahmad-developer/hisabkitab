@@ -9,25 +9,36 @@ const rateLimit = require("express-rate-limit");
 const { connectDatabase } = require("./db");
 
 function getAdminOriginConfig() {
-    if (!process.env.ADMIN_ORIGIN) {
-        return { origin: null, error: "ADMIN_ORIGIN must be configured for the admin API." };
+    const origins = new Set();
+    const configuredOrigins = [
+        process.env.ADMIN_ORIGIN,
+        process.env.VERCEL_URL,
+        process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    ].filter(Boolean);
+
+    for (const value of configuredOrigins) {
+        let url;
+        try {
+            url = new URL(value.includes("://") ? value : `https://${value}`);
+        } catch {
+            return { origins: [], error: "Admin origin configuration must contain valid URLs." };
+        }
+
+        if (!["http:", "https:"].includes(url.protocol)) {
+            return { origins: [], error: "Admin origins must use HTTP or HTTPS." };
+        }
+        if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+            return { origins: [], error: "Admin origins must use HTTPS in production." };
+        }
+
+        origins.add(url.origin);
     }
 
-    let url;
-    try {
-        url = new URL(process.env.ADMIN_ORIGIN);
-    } catch {
-        return { origin: null, error: "ADMIN_ORIGIN must be a valid URL." };
+    if (origins.size === 0) {
+        return { origins: [], error: "ADMIN_ORIGIN must be configured for the admin API." };
     }
 
-    if (!["http:", "https:"].includes(url.protocol)) {
-        return { origin: null, error: "ADMIN_ORIGIN must use HTTP or HTTPS." };
-    }
-    if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
-        return { origin: null, error: "ADMIN_ORIGIN must use HTTPS in production." };
-    }
-
-    return { origin: url.origin, error: null };
+    return { origins: [...origins], error: null };
 }
 
 const adminOriginConfig = getAdminOriginConfig();
@@ -37,12 +48,12 @@ app.locals.adminConfigurationError = adminOriginConfig.error;
 app.use(helmet());
 app.use(express.json({ limit: "100kb" }));
 
-app.use("/api/admin", cors({ origin: adminOriginConfig.origin || false, credentials: true }));
+app.use("/api/admin", cors({ origin: adminOriginConfig.origins, credentials: true }));
 app.use("/api/admin", (req, res, next) => {
     if (adminOriginConfig.error) {
         return res.status(503).json({ message: adminOriginConfig.error });
     }
-    if (["GET", "HEAD", "OPTIONS"].includes(req.method) || req.get("origin") === adminOriginConfig.origin) {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method) || adminOriginConfig.origins.includes(req.get("origin"))) {
         return next();
     }
     return res.status(403).json({ message: "Admin origin allowed nahi hai." });
@@ -54,7 +65,10 @@ app.use(async (req, res, next) => {
         next();
     } catch (error) {
         console.error("Mongo error:", error.message);
-        res.status(503).json({ message: "Database unavailable." });
+        const message = process.env.MONGO_URI
+            ? "Database unavailable. Check the database connection and MongoDB network access."
+            : "Database configuration missing: set MONGO_URI in the deployment environment.";
+        res.status(503).json({ message });
     }
 });
 
