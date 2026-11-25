@@ -3,6 +3,10 @@
 const app = require("./app");
 const { connectDatabase } = require("./db");
 
+if (app.locals.adminConfigurationError) {
+    throw new Error(app.locals.adminConfigurationError);
+}
+
 const port = Number(process.env.PORT) || 5000;
 
 connectDatabase()

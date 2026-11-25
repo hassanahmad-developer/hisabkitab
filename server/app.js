@@ -8,26 +8,41 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { connectDatabase } = require("./db");
 
-if (!process.env.ADMIN_ORIGIN) {
-    throw new Error("ADMIN_ORIGIN must be configured for the admin API.");
+function getAdminOriginConfig() {
+    if (!process.env.ADMIN_ORIGIN) {
+        return { origin: null, error: "ADMIN_ORIGIN must be configured for the admin API." };
+    }
+
+    let url;
+    try {
+        url = new URL(process.env.ADMIN_ORIGIN);
+    } catch {
+        return { origin: null, error: "ADMIN_ORIGIN must be a valid URL." };
+    }
+
+    if (!["http:", "https:"].includes(url.protocol)) {
+        return { origin: null, error: "ADMIN_ORIGIN must use HTTP or HTTPS." };
+    }
+    if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+        return { origin: null, error: "ADMIN_ORIGIN must use HTTPS in production." };
+    }
+
+    return { origin: url.origin, error: null };
 }
 
-const adminOriginUrl = new URL(process.env.ADMIN_ORIGIN);
-if (!["http:", "https:"].includes(adminOriginUrl.protocol)) {
-    throw new Error("ADMIN_ORIGIN must use HTTP or HTTPS.");
-}
-if (process.env.NODE_ENV === "production" && adminOriginUrl.protocol !== "https:") {
-    throw new Error("ADMIN_ORIGIN must use HTTPS in production.");
-}
-const adminOrigin = adminOriginUrl.origin;
+const adminOriginConfig = getAdminOriginConfig();
 
 const app = express();
+app.locals.adminConfigurationError = adminOriginConfig.error;
 app.use(helmet());
 app.use(express.json({ limit: "100kb" }));
 
-app.use("/api/admin", cors({ origin: adminOrigin, credentials: true }));
+app.use("/api/admin", cors({ origin: adminOriginConfig.origin || false, credentials: true }));
 app.use("/api/admin", (req, res, next) => {
-    if (["GET", "HEAD", "OPTIONS"].includes(req.method) || req.get("origin") === adminOrigin) {
+    if (adminOriginConfig.error) {
+        return res.status(503).json({ message: adminOriginConfig.error });
+    }
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method) || req.get("origin") === adminOriginConfig.origin) {
         return next();
     }
     return res.status(403).json({ message: "Admin origin allowed nahi hai." });

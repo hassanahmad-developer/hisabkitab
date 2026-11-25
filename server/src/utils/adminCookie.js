@@ -1,7 +1,14 @@
+/* global process, module */
+
 const ADMIN_COOKIE_NAME = "admin_session";
 const ADMIN_COOKIE_PATH = "/api/admin";
 const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const secureCookie = new URL(process.env.ADMIN_ORIGIN).protocol === "https:";
+let secureCookie = false;
+try {
+    secureCookie = new URL(process.env.ADMIN_ORIGIN).protocol === "https:";
+} catch {
+    // Admin routes return a configuration error before any cookie operation.
+}
 
 function getAdminCookie(req) {
     const prefix = `${ADMIN_COOKIE_NAME}=`;
