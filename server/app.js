@@ -8,6 +8,52 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { connectDatabase } = require("./db");
 
+function getDatabaseErrorResponse(error) {
+    const errorMessage = error && typeof error.message === "string" ? error.message : "";
+
+    if (!process.env.MONGO_URI) {
+        return {
+            code: "MONGO_URI_MISSING",
+            message: "Database configuration missing: set MONGO_URI in the deployment environment.",
+        };
+    }
+
+    if (
+        (error && (error.code === 18 || error.codeName === "AuthenticationFailed"))
+        || /authentication failed|bad auth/i.test(errorMessage)
+    ) {
+        return {
+            code: "MONGO_AUTH_FAILED",
+            message: "MongoDB authentication failed. Verify the Atlas database user's credentials.",
+        };
+    }
+
+    if (
+        (error && error.name === "MongooseServerSelectionError")
+        || /\b(ENOTFOUND|ENODATA|ETIMEDOUT|ECONNREFUSED)\b|querySrv/i.test(errorMessage)
+    ) {
+        return {
+            code: "MONGO_UNREACHABLE",
+            message: "MongoDB could not be reached. Check Atlas Network Access and Vercel egress.",
+        };
+    }
+
+    if (
+        (error && error.name === "MongoParseError")
+        || /invalid connection string|invalid scheme|must start with mongodb/i.test(errorMessage)
+    ) {
+        return {
+            code: "MONGO_URI_INVALID",
+            message: "MONGO_URI is invalid. Copy a valid connection string from MongoDB Atlas.",
+        };
+    }
+
+    return {
+        code: "DATABASE_CONNECTION_FAILED",
+        message: "Database unavailable. Check the database connection and MongoDB network access.",
+    };
+}
+
 function getAdminOriginConfig() {
     const origins = new Set();
     const configuredOrigins = [
@@ -65,10 +111,7 @@ app.use(async (req, res, next) => {
         next();
     } catch (error) {
         console.error("Mongo error:", error.message);
-        const message = process.env.MONGO_URI
-            ? "Database unavailable. Check the database connection and MongoDB network access."
-            : "Database configuration missing: set MONGO_URI in the deployment environment.";
-        res.status(503).json({ message });
+        res.status(503).json(getDatabaseErrorResponse(error));
     }
 });
 
